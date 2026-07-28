@@ -24,6 +24,8 @@ class Deck:
         random.shuffle(self.cards)
 
     def deal(self, players):
+        for player in players:
+            player.hand = []
         for i, card in enumerate(self.cards[:-BOTTOM_CARD_COUNT]):
             players[i % len(players)].hand.append(card)
 

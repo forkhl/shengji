@@ -14,7 +14,7 @@ class Trick:
         winning_player = self.moves[0][0]
 
         for player, move in self.moves[1:]:
-            if self.compare_moves(move, winning_move, self.round) > 0:
+            if self.compare_moves(move, winning_move) > 0:
                 winning_move = move
                 winning_player = player
 
@@ -27,9 +27,9 @@ class Trick:
             self.lead_move = move
 
     def is_valid_move(self, player, move):
-        if self.lead_move is None and move.type != "unknown":
-            return True
-        
+        if self.lead_move is None:
+            return move.type != "unknown"
+
         # length always has to match
         if len(self.lead_move.cards) != len(move.cards):
             return False
@@ -48,6 +48,7 @@ class Trick:
             if all(card in matching_cards for card in move.cards) and len(matching_cards) >= 2:
                 if self.has_pair(matching_cards) and move.type != "pair":
                     return False
+                return True
             elif len(matching_cards) == 0:
                 return True
             elif len(matching_cards) == 1:
@@ -58,13 +59,28 @@ class Trick:
                 return False
 
         if self.lead_move.type == "tractor":
-            if move.type == "tractor":
-                return True
-            elif self.has_tractor(matching_cards):
-                return False
-            elif self.has_pair(matching_cards):
-                return self.count_pairs(move.cards) >= self.count_pairs(matching_cards)
+            # player has more matching cards than needed: they get to choose
+            # which ones to break, subject to the tractor/pair rules below
+            if len(matching_cards) > len(self.lead_move.cards):
+
+                if move.type == "tractor" and all(card in matching_cards for card in move.cards):
+                    return True
+
+                elif self.has_tractor(matching_cards):
+                    return False
+
+                elif self.has_pair(matching_cards):
+                    return self.count_pairs(move.cards) >= self.count_pairs(matching_cards)
+
+                else:
+                    return all(card in matching_cards for card in move.cards)
+
+            # player has exactly enough or fewer matching cards: no choice,
+            # every matching card must be played
             else:
+                for card in matching_cards:
+                    if card not in move.cards:
+                        return False
                 return True
 
     def count_pairs(self, cards):
@@ -141,6 +157,3 @@ class Trick:
                 self.round
             )
         return -2
-
-    
-
