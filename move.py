@@ -4,18 +4,18 @@ from rules import compare_cards
 
 
 class Move:
-    def __init__(self, cards, game):
+    def __init__(self, cards, round):
         self.cards = cards
-        self.type = self.get_type(game)
+        self.type = self.get_type(round)
 
-    def get_type(self, game):
+    def get_type(self, round):
         if len(self.cards) == 1:
             return "single"
 
         if self.is_pair():
             return "pair"
 
-        if self.is_tractor(game):
+        if self.is_tractor(round):
             return "tractor"
 
         return "unknown"
@@ -31,7 +31,7 @@ class Move:
         )
 
 
-    def is_tractor(self, game):
+    def is_tractor(self, round):
         # Must have at least two pairs
         if len(self.cards) < 4 or len(self.cards) % 2 != 0:
             return False
@@ -53,7 +53,7 @@ class Move:
 
         for rank in counts:
             card = next(card for card in self.cards if card.rank == rank)
-            positions.append(get_card_position(card, game))
+            positions.append(get_card_position(card, round))
 
         positions.sort()
 
