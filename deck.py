@@ -10,6 +10,7 @@ class Deck:
     def __init__(self):
         self.cards = []
         self.create_deck(2)
+        self.deal_order = []
 
     def create_deck(self, num_decks):
         for i in range(num_decks):
@@ -24,9 +25,11 @@ class Deck:
         random.shuffle(self.cards)
 
     def deal(self, players):
+        self.deal_order = []
         for player in players:
             player.hand = []
         for i, card in enumerate(self.cards[:-BOTTOM_CARD_COUNT]):
             players[i % len(players)].hand.append(card)
+            self.deal_order.append(card)
 
         return self.cards[-BOTTOM_CARD_COUNT:]

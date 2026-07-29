@@ -83,6 +83,16 @@ class Trick:
                         return False
                 return True
 
+    def get_points(self):
+        points = 0
+        for _, move in self.moves:
+            for card in move.cards:
+                if card.rank == "5":
+                    points += 5
+                elif card.rank == "10" or card.rank == "K":
+                    points += 10
+        return points
+
     def count_pairs(self, cards):
         counts = {}
         for card in cards:
@@ -130,9 +140,6 @@ class Trick:
 
         return matching_cards
 
-
-
-
     # assumes moves are legal
     # NOT FLUSHED OUT
     def compare_moves(self, move1, move2):
@@ -157,3 +164,6 @@ class Trick:
                 self.round
             )
         return -2
+
+    def get_card_count(self):
+        return len(self.lead_move.cards)

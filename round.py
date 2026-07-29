@@ -20,6 +20,32 @@ class Round:
 
         self.current_call = None
 
+        self.current_player = None
+
+    def play_move(self, player, move):
+        if player != self.current_player:
+            return False
+        if not self.current_trick.is_valid_move(player, move):
+            return False
+        for card in move.cards:
+            player.hand.remove(card)
+        self.current_trick.add_move(player, move)
+        if len(self.current_trick.moves) == 4:
+            winner = self.end_trick()
+            if self.is_round_over():
+                self.game.end_round()
+            else:
+                self.start_trick(winner)
+        else:
+            self.current_player = self.get_next_player()
+        return True
+
+    def is_round_over(self):
+        for player in self.game.players:
+            if len(player.hand) > 0:
+                return False
+        return True
+
     def can_call(self, player, cards):
         for card in cards:
             if card not in player.hand:
@@ -120,8 +146,13 @@ class Round:
         self.game.deck.shuffle()
         self.bottom_cards = self.game.deck.deal(self.game.players)
 
+    def get_next_player(self):
+        index = self.game.players.index(self.current_player)
+        return self.game.players[(index+1)%4]
+
     def start_trick(self, lead_player):
         self.current_trick = Trick(lead_player, self)
+        self.current_player = lead_player
 
     def end_trick(self):
         winner = self.current_trick.get_winner()
@@ -135,3 +166,18 @@ class Round:
         self.current_trick = None
 
         return winner
+
+    def add_bottom_points(self):
+        if self.tricks[-1].get_winner().team != self.attacking_team:
+            return
+        cards_used = self.trick[-1].get_card_count()
+        mult = 2**cards_used
+        points = 0
+        for card in self.bottom_cards:
+            if card.rank == "5":
+                points += 5
+            elif card.rank == "10":
+                points += 10
+            elif card.rank == "K":
+                points += 10
+        self.attacker_points += points * mult
