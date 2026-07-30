@@ -170,7 +170,7 @@ class Round:
     def add_bottom_points(self):
         if self.tricks[-1].get_winner().team != self.attacking_team:
             return
-        cards_used = self.trick[-1].get_card_count()
+        cards_used = self.tricks[-1].get_card_count()
         mult = 2**cards_used
         points = 0
         for card in self.bottom_cards:
