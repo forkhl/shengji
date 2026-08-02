@@ -5,13 +5,18 @@ Stdlib only -- no Flask/FastAPI. This file contains NO game rules. It only:
   - holds a Game / Round instance
   - calls existing backend methods (make_call, finish_calling, pick_up_bottom,
     discard_bottom, start_trick, play_move) and reports what they return
-  - for the 3 bot seats, brute-force searches combinations of a bot's hand
-    and asks Trick.is_valid_move() whether each one is legal -- it never
-    encodes what "legal" means itself
+  - tracks whose turn it is to act next (calling_turn_index during calling;
+    round.current_player, already tracked by round.py, during tricks) and
+    exposes only that one player's hand at a time
   - serializes Round/Trick/Move state to JSON for the browser and reads
-    JSON card selections back into Card(rank, suit) objects (Card now has
+    JSON card selections back into Card(rank, suit) objects (Card has
     __eq__ by rank+suit, so these compare correctly against hand cards
     without needing to be the exact same object)
+
+All four seats are manually controlled from the browser -- there are no
+bots. Every call, discard, and play is a distinct request the frontend
+makes on behalf of whichever player is currently active, which is what
+gives the "reveal one player at a time" behavior for free.
 
 Run with:
     python server.py
@@ -20,9 +25,7 @@ then open http://127.0.0.1:8765 in a browser.
 
 import json
 import os
-import random
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from itertools import combinations
 from urllib.parse import urlparse
 
 from card import Card
@@ -30,7 +33,7 @@ from game import Game
 from move import Move
 from player import Player
 
-PLAYER_NAMES = ["You", "Bot 1", "Bot 2", "Bot 3"]
+PLAYER_NAMES = ["Player 1", "Player 2", "Player 3", "Player 4"]
 PORT = 8765
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
@@ -38,12 +41,19 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 class GameSession:
     def __init__(self):
         self.players = [Player(name) for name in PLAYER_NAMES]
-        self.human = self.players[0]
         self.game = Game(self.players)
         self.round = None
         self.phase = None
         self.message = ""
         self.last_round_summary = None
+
+        # Index into self.players for whose turn it is to call/pass during
+        # the calling phase. round.py has no turn concept during calling
+        # (any player can call() at any time) -- this index exists only to
+        # sequence "ask each player once, in order" for the UI. It never
+        # affects what calls are legal; round.can_call() alone decides that.
+        self.calling_turn_index = 0
+
         self.new_game()
 
     # ---------------- actions (called from HTTP handlers) ----------------
@@ -52,32 +62,34 @@ class GameSession:
         self.game.start_round()
         self.round = self.game.current_round
         self.phase = "calling"
-        self.message = "Calling phase: select level cards and call, or finish calling."
+        self.calling_turn_index = 0
+        self.message = f"{self._active_player().name}'s turn to call or pass."
         self.last_round_summary = None
 
-    def make_call(self, cards):
-        ok = self.round.make_call(self.human, cards)
-        self.message = "Call made." if ok else "That's not a legal call."
+    def calling_action(self, action, cards):
+        """
+        One player's turn during calling: either call() with some cards, or
+        pass. Advances to the next player afterwards. After all 4 players
+        have had a turn, automatically finishes calling (same as the old
+        "Finish Calling" button) and moves into discard/trick phase.
+        """
+        player = self._active_player()
 
-    def finish_calling(self):
-        called = self.round.finish_calling()
-
-        if called:
-            self.round.pick_up_bottom()
-
-            if self.round.it_player is self.human:
-                self.human.sort_hand(self.round)
-                self.phase = "discard"
-                self.message = f"Select exactly {len(self.round.bottom_cards)} cards to bury."
-            else:
-                # Bots never call in this version, so this is a placeholder
-                # for when they do -- bury arbitrary cards so play continues.
-                it = self.round.it_player
-                self.round.discard_bottom(it.hand[: len(self.round.bottom_cards)])
-                self._begin_trick(it)
+        if action == "call":
+            ok = self.round.make_call(player, cards)
+            if not ok:
+                self.message = f"That's not a legal call for {player.name}."
+                return  # same player's turn again; do not advance
+            self.message = f"{player.name} called."
         else:
-            self.message = "No one called. Playing with no trump suit."
-            self._begin_trick(self.human)
+            self.message = f"{player.name} passed."
+
+        self.calling_turn_index += 1
+
+        if self.calling_turn_index >= len(self.players):
+            self._finish_calling()
+        else:
+            self.message += f" {self._active_player().name}'s turn."
 
     def discard_bottom(self, cards):
         needed = len(self.round.bottom_cards)
@@ -95,25 +107,49 @@ class GameSession:
         self._begin_trick(self.round.it_player)
 
     def play_move(self, cards):
+        player = self.round.current_player
         move = Move(cards, self.round)
         old_round = self.round
 
-        ok = self.round.play_move(self.human, move)
+        ok = self.round.play_move(player, move)
 
         if not ok:
             self.message = "That's not a legal move."
             return
 
-        self.message = ""
         self._after_move(old_round)
 
     # ---------------- internal orchestration ----------------
+
+    def _active_player(self):
+        if self.phase == "calling":
+            return self.players[self.calling_turn_index]
+        if self.phase == "discard":
+            return self.round.it_player
+        if self.phase == "trick":
+            return self.round.current_player
+        return None
+
+    def _finish_calling(self):
+        called = self.round.finish_calling()
+
+        if called:
+            self.round.pick_up_bottom()
+            it = self.round.it_player
+            it.sort_hand(self.round)
+            self.phase = "discard"
+            self.message = (
+                f"{it.name} won the call and picked up the bottom. "
+                f"Select exactly {len(self.round.bottom_cards)} cards to bury."
+            )
+        else:
+            self.message = "No one called. Playing with no trump suit."
+            self._begin_trick(self.players[0])
 
     def _begin_trick(self, lead_player):
         self.round.start_trick(lead_player)
         self.phase = "trick"
         self.message = f"{lead_player.name} leads."
-        self._run_bots_until_human_or_round_end()
 
     def _after_move(self, old_round):
         if self.game.current_round is not old_round:
@@ -124,33 +160,8 @@ class GameSession:
 
         if self.round.current_trick is None:
             self.message = "Trick complete."
-
-        self._run_bots_until_human_or_round_end()
-
-    def _run_bots_until_human_or_round_end(self):
-        while True:
-            if self.round.current_trick is None:
-                return
-
-            current = self.round.current_player
-
-            if current is None or current is self.human:
-                return
-
-            move = self._pick_bot_move(current)
-
-            if move is None:
-                self.message = f"{current.name} has no legal move -- stuck."
-                return
-
-            old_round = self.round
-            self.round.play_move(current, move)
-
-            if self.game.current_round is not old_round:
-                self._record_round_summary(old_round)
-                return
-
-            self.round = self.game.current_round
+        else:
+            self.message = f"{self.round.current_player.name}'s turn."
 
     def _record_round_summary(self, finished_round):
         self.last_round_summary = {
@@ -160,35 +171,10 @@ class GameSession:
         }
         self.round = self.game.current_round
         self.phase = "calling"
-        self.message = "New round. Calling phase."
-
-    def _pick_bot_move(self, player):
-        """
-        Brute-force search over combinations of the bot's hand, asking the
-        backend (Move.type / Trick.is_valid_move) whether each candidate is
-        legal. Encodes no Sheng Ji rule itself.
-        """
-        trick = self.round.current_trick
-
-        if trick.lead_move is None:
-            cards = player.hand[:]
-            random.shuffle(cards)
-            for card in cards:
-                move = Move([card], self.round)
-                if move.type != "unknown":
-                    return move
-            return None
-
-        needed = len(trick.lead_move.cards)
-        cards = player.hand[:]
-        random.shuffle(cards)
-
-        for chosen in combinations(cards, needed):
-            move = Move(list(chosen), self.round)
-            if trick.is_valid_move(player, move):
-                return move
-
-        return None
+        self.calling_turn_index = 0
+        self.message = (
+            f"New round. {self._active_player().name}'s turn to call or pass."
+        )
 
     # ---------------- serialization ----------------
 
@@ -211,21 +197,19 @@ class GameSession:
                 for p, m in self.round.current_trick.moves
             ]
 
-        current_player_name = None
-        if self.round.current_player is not None:
-            current_player_name = self.round.current_player.name
+        active = self._active_player()
 
         return {
             "phase": self.phase,
             "level": self.round.level,
             "trumpSuit": self.round.trump_suit,
             "attackerPoints": self.round.attacker_points,
-            "humanHand": [self._card_json(c) for c in self.human.hand],
+            "activePlayerName": active.name if active else None,
+            "activeHand": [self._card_json(c) for c in active.hand] if active else [],
             "handSizes": [{"name": p.name, "count": len(p.hand)} for p in self.players],
             "currentCall": current_call,
             "bottomCount": len(self.round.bottom_cards),
             "currentTrick": current_trick,
-            "currentPlayerName": current_player_name,
             "message": self.message,
             "lastRoundSummary": self.last_round_summary,
         }
@@ -300,13 +284,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(session.state())
             return
 
-        if path == "/api/make_call":
-            session.make_call(cards_from_json(body.get("cards", [])))
-            self._send_json(session.state())
-            return
-
-        if path == "/api/finish_calling":
-            session.finish_calling()
+        if path == "/api/calling_action":
+            action = body.get("action")
+            cards = cards_from_json(body.get("cards", []))
+            session.calling_action(action, cards)
             self._send_json(session.state())
             return
 

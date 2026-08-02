@@ -189,3 +189,20 @@ button.action:disabled {
   opacity: 0.85;
   margin-bottom: 6px;
 }
+
+/* Small reveal animation for turn-based calling and one-at-a-time trick
+   plays -- purely cosmetic, no effect on game logic. */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reveal {
+  animation: reveal-in 0.25s ease-out;
+}

@@ -8,6 +8,9 @@ class Team:
         self.players = players
         self.level = "2"
 
+        for player in players:
+            player.team = self
+
     def has_player(self, player):
         return player in self.players
 

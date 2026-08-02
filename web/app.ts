@@ -41,12 +41,12 @@ interface GameState {
   level: string;
   trumpSuit: string | null;
   attackerPoints: number;
-  humanHand: CardJson[];
+  activePlayerName: string | null;
+  activeHand: CardJson[];
   handSizes: HandSizeInfo[];
   currentCall: CallInfo | null;
   bottomCount: number;
   currentTrick: TrickMoveInfo[] | null;
-  currentPlayerName: string | null;
   message: string;
   lastRoundSummary: RoundSummary | null;
 }
@@ -91,7 +91,7 @@ function toggleIndex(index: number): void {
 
 function selectedCards(): CardJson[] {
   if (!state) return [];
-  return selectedIndices.map((i) => state!.humanHand[i]);
+  return selectedIndices.map((i) => state!.activeHand[i]);
 }
 
 // ---------------- actions ----------------
@@ -102,18 +102,18 @@ async function onNewGame(): Promise<void> {
   render();
 }
 
-async function onMakeCall(): Promise<void> {
+async function onCallingCall(): Promise<void> {
   if (selectedIndices.length === 0) {
     alert("Select one or two cards first.");
     return;
   }
-  state = await apiPost("/api/make_call", { cards: selectedCards() });
+  state = await apiPost("/api/calling_action", { action: "call", cards: selectedCards() });
   selectedIndices = [];
   render();
 }
 
-async function onFinishCalling(): Promise<void> {
-  state = await apiPost("/api/finish_calling");
+async function onCallingPass(): Promise<void> {
+  state = await apiPost("/api/calling_action", { action: "pass", cards: [] });
   selectedIndices = [];
   render();
 }
@@ -243,8 +243,10 @@ function renderHandSizes(s: GameState): HTMLElement {
 }
 
 function renderCallingPanel(s: GameState): HTMLElement {
-  const panel = el("div", "panel");
-  panel.appendChild(el("h3", undefined, "Calling phase"));
+  const panel = el("div", "panel reveal");
+  panel.appendChild(
+    el("h3", undefined, `Calling phase \u2014 ${s.activePlayerName ?? ""}'s turn`)
+  );
 
   if (s.currentCall) {
     const p = el(
@@ -257,26 +259,26 @@ function renderCallingPanel(s: GameState): HTMLElement {
   }
 
   panel.appendChild(el("div", "selection-count", `Selected: ${selectedIndices.length}`));
-  panel.appendChild(renderHand(s.humanHand, true));
+  panel.appendChild(renderHand(s.activeHand, true));
 
-  const makeCallBtn = el("button", "action", "Make Call");
-  makeCallBtn.addEventListener("click", onMakeCall);
-  panel.appendChild(makeCallBtn);
+  const callBtn = el("button", "action", "Call");
+  callBtn.addEventListener("click", onCallingCall);
+  panel.appendChild(callBtn);
 
-  const finishBtn = el("button", "action", "Finish Calling");
-  finishBtn.addEventListener("click", onFinishCalling);
-  panel.appendChild(finishBtn);
+  const passBtn = el("button", "action", "Pass");
+  passBtn.addEventListener("click", onCallingPass);
+  panel.appendChild(passBtn);
 
   return panel;
 }
 
 function renderDiscardPanel(s: GameState): HTMLElement {
-  const panel = el("div", "panel");
-  panel.appendChild(el("h3", undefined, "Bury the bottom"));
+  const panel = el("div", "panel reveal");
+  panel.appendChild(el("h3", undefined, `Bury the bottom \u2014 ${s.activePlayerName ?? ""}`));
   panel.appendChild(
     el("div", "selection-count", `Selected: ${selectedIndices.length} / ${s.bottomCount}`)
   );
-  panel.appendChild(renderHand(s.humanHand, true));
+  panel.appendChild(renderHand(s.activeHand, true));
 
   const buryBtn = el("button", "action", "Bury Selected Cards");
   buryBtn.addEventListener("click", onDiscardBottom);
@@ -291,8 +293,11 @@ function renderTrickPanel(s: GameState): HTMLElement {
 
   const row = el("div", "trick-row");
   if (s.currentTrick && s.currentTrick.length > 0) {
-    s.currentTrick.forEach((m) => {
-      const col = el("div", "trick-col");
+    s.currentTrick.forEach((m, i) => {
+      const col = el("div", "trick-col reveal");
+      // stagger each play's entrance slightly so they visibly appear
+      // one at a time rather than all at once
+      col.style.animationDelay = `${i * 60}ms`;
       col.appendChild(el("div", "player-name", m.playerName));
       col.appendChild(renderCardChips(m.cards));
       row.appendChild(col);
@@ -302,14 +307,14 @@ function renderTrickPanel(s: GameState): HTMLElement {
   }
   panel.appendChild(row);
 
-  const isHumanTurn = s.currentPlayerName === "You";
+  const canAct = s.activePlayerName !== null;
   panel.appendChild(
-    el("div", undefined, `Current turn: ${s.currentPlayerName ?? ""}`)
+    el("div", undefined, `Current turn: ${s.activePlayerName ?? ""}`)
   );
 
-  panel.appendChild(renderHand(s.humanHand, isHumanTurn));
+  panel.appendChild(renderHand(s.activeHand, canAct));
 
-  if (isHumanTurn) {
+  if (canAct) {
     const playBtn = el("button", "action", "Play Selected Cards");
     playBtn.addEventListener("click", onPlayMove);
     panel.appendChild(playBtn);
