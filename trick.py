@@ -116,16 +116,11 @@ class Trick:
 
 
     def has_pair(self, cards):
-        ranks = {}
+        counts = {}
         for card in cards:
-            if card.rank not in ranks:
-                ranks[card.rank] = 1
-            else:
-                ranks[card.rank] += 1
-        for count in ranks.values():
-            if count >= 2:
-                return True
-        return False
+            key = (card.rank, card.suit)
+            counts[key] = counts.get(key, 0) + 1
+        return any(count >= 2 for count in counts.values())
 
     def get_matching_cards(self, player, lead_move):
         matching_cards = []
